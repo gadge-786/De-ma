@@ -1,0 +1,6 @@
+{
+  "name": "Xiaohongshu (RED)",
+  "description": "An aesthetic, community-driven social commerce app combining visual search, lifestyle notes with interactive product hotspots, and instant social shopping.",
+  "requestFramePermissions": ["geolocation", "camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
