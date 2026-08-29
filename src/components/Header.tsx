@@ -54,10 +54,10 @@ export const Header: React.FC<HeaderProps> = ({
         {/* Brand Logo */}
         <div className="flex items-center gap-2 cursor-pointer shrink-0" onClick={() => onTabChange('explore')}>
           <div className="w-8 h-8 rounded-xl bg-[#FF2442] flex items-center justify-center shadow-sm shadow-[#FF2442]/20">
-            <span className="text-white font-black text-xs tracking-tight">RED</span>
+            <span className="text-white font-black text-[10px] tracking-tight">PHANO</span>
           </div>
           <span className="font-extrabold text-base sm:text-lg tracking-tight text-[#111111] hidden md:inline-block">
-            Xiaohongshu <span className="text-[#FF2442] font-semibold text-xs ml-1 bg-red-50 px-1.5 py-0.5 rounded-full">小红书</span>
+            phano
           </span>
         </div>
 
