@@ -1,6 +1,5 @@
 import { Note, Product, Comment, CartItem, Order, User } from '../types';
 import { MOCK_NOTES, MOCK_PRODUCTS, MOCK_COMMENTS, CURRENT_USER } from '../data/mockData';
-import { supabase } from './supabase';
 
 const NOTES_STORAGE_KEY = 'red_notes_db_v1';
 const PRODUCTS_STORAGE_KEY = 'red_products_db_v1';
@@ -222,19 +221,4 @@ export function saveOrder(order: Order): void {
   } catch (err) {
     console.error('Failed saving order', err);
   }
-}
-
-// Example: Fetching notes with author profile & hotspots
-export async function fetchFeedNotes() {
-  const { data, error } = await supabase
-    .from('notes')
-    .select(`
-      *,
-      user:profiles(*),
-      hotspots:note_hotspots(*, product:products(*))
-    `)
-    .order('created_at', { ascending: false });
-
-  if (error) console.error(error);
-  return data || [];
 }

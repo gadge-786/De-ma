@@ -1,5 +1,5 @@
 import React from 'react';
-import { Heart, ShoppingBag, MapPin, Sparkles, Layers } from 'lucide-react';
+import { Heart, ShoppingBag, MapPin, Sparkles, Layers, Sliders } from 'lucide-react';
 import { Note } from '../types';
 
 interface FeedGridProps {
@@ -7,6 +7,8 @@ interface FeedGridProps {
   onSelectNote: (note: Note) => void;
   onToggleLike: (noteId: string, e: React.MouseEvent) => void;
   isNearbyTab?: boolean;
+  isAlgoTab?: boolean;
+  onOpenAlgoTuner?: () => void;
 }
 
 export const FeedGrid: React.FC<FeedGridProps> = ({
@@ -14,6 +16,8 @@ export const FeedGrid: React.FC<FeedGridProps> = ({
   onSelectNote,
   onToggleLike,
   isNearbyTab,
+  isAlgoTab,
+  onOpenAlgoTuner,
 }) => {
   if (notes.length === 0) {
     return (
@@ -22,17 +26,58 @@ export const FeedGrid: React.FC<FeedGridProps> = ({
           <Sparkles className="w-7 h-7" />
         </div>
         <h3 className="text-base font-bold text-[#111111] mb-1">No Lifestyle Notes Found</h3>
-        <p className="text-xs text-[#666666] max-w-sm mx-auto">
-          Try adjusting your category filter or search keywords to discover more community reviews and itineraries.
+        <p className="text-xs text-[#666666] max-w-sm mx-auto mb-4">
+          Try adjusting your category filter or tuning your algorithm weights to discover more community reviews and itineraries.
         </p>
+        {isAlgoTab && onOpenAlgoTuner && (
+          <button
+            onClick={onOpenAlgoTuner}
+            className="px-4 py-2 bg-[#FF2442] text-white text-xs font-bold rounded-full shadow-md shadow-[#FF2442]/20 hover:bg-[#e01e38] transition-all cursor-pointer"
+          >
+            Fine-Tune Your Algo
+          </button>
+        )}
       </div>
     );
   }
 
   return (
-    <div className="max-w-7xl mx-auto px-2.5 sm:px-4 py-3">
+    <div className="max-w-7xl mx-auto px-2.5 sm:px-4 py-3 space-y-3">
+      {/* Your Algo Stream Header Banner */}
+      {isAlgoTab && (
+        <div className="bg-linear-to-r from-neutral-900 via-neutral-800 to-neutral-900 rounded-2xl p-3.5 sm:p-4 text-white flex items-center justify-between shadow-md">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-linear-to-tr from-[#FF2442] to-amber-500 flex items-center justify-center shadow-md shrink-0">
+              <Sparkles className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h2 className="text-xs sm:text-sm font-extrabold tracking-tight">Your Algo Feed</h2>
+                <span className="bg-white/20 text-[10px] font-bold px-2 py-0.5 rounded-full text-neutral-200 uppercase tracking-wider">
+                  Personalized Stream
+                </span>
+              </div>
+              <p className="text-[11px] text-neutral-300 hidden sm:block">
+                Trained on your dwell time, saves, and likes across Shows & Cinema, Career, Trading, Fitness & more.
+              </p>
+            </div>
+          </div>
+
+          {onOpenAlgoTuner && (
+            <button
+              id="feed-tune-algo-banner-btn"
+              onClick={onOpenAlgoTuner}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-white/10 hover:bg-white/20 rounded-xl text-xs font-bold text-white transition-all cursor-pointer shrink-0"
+            >
+              <Sliders className="w-3.5 h-3.5 text-amber-400" />
+              <span>Tune Engine</span>
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Asymmetric Dual-Column Masonry Grid */}
-      <div className="columns-2 md:columns-3 lg:columns-4 gap-2.5 sm:gap-3.5 [column-fill:_balance]">
+      <div className="columns-2 md:columns-3 lg:columns-4 gap-2.5 sm:gap-3.5 [column-fill:balance]">
         {notes.map((note) => {
           const hasHotspots = note.hotspots && note.hotspots.length > 0;
           const isMultiImage = note.mediaUrls && note.mediaUrls.length > 1;
@@ -51,7 +96,7 @@ export const FeedGrid: React.FC<FeedGridProps> = ({
                   alt={note.title}
                   loading="lazy"
                   referrerPolicy="no-referrer"
-                  className="w-full object-cover group-hover:scale-[1.02] transition-transform duration-300 min-h-[160px]"
+                  className="w-full object-cover group-hover:scale-[1.02] transition-transform duration-300 min-h-40"
                 />
 
                 {/* Multi-image Stack Badge */}
@@ -59,6 +104,14 @@ export const FeedGrid: React.FC<FeedGridProps> = ({
                   <div className="absolute top-2 right-2 px-1.5 py-0.5 rounded-md bg-black/50 backdrop-blur-md text-white text-[10px] font-semibold flex items-center gap-1 shadow-sm">
                     <Layers className="w-3 h-3" />
                     <span>{note.mediaUrls.length}</span>
+                  </div>
+                )}
+
+                {/* Your Algo Match Tag Pill */}
+                {note.algoMatchReason && (isAlgoTab || note.algoMatchPercentage && note.algoMatchPercentage > 88) && (
+                  <div className="absolute top-2 left-2 px-2 py-0.5 rounded-full bg-neutral-900/80 backdrop-blur-md text-white text-[9px] sm:text-[10px] font-bold flex items-center gap-1 shadow-sm border border-white/10">
+                    <Sparkles className="w-2.5 h-2.5 text-amber-400" />
+                    <span className="truncate max-w-30 sm:max-w-37.5">{note.algoMatchReason}</span>
                   </div>
                 )}
 
@@ -93,7 +146,7 @@ export const FeedGrid: React.FC<FeedGridProps> = ({
                       src={note.user?.avatarUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100'}
                       alt={note.user?.displayName || 'User'}
                       referrerPolicy="no-referrer"
-                      className="w-4 h-4 sm:w-5 sm:h-5 rounded-full object-cover flex-shrink-0"
+                      className="w-4 h-4 sm:w-5 sm:h-5 rounded-full object-cover shrink-0"
                     />
                     <span className="truncate text-[11px] sm:text-xs text-neutral-600 font-medium">
                       {note.user?.displayName || 'Creator'}
@@ -129,3 +182,4 @@ export const FeedGrid: React.FC<FeedGridProps> = ({
     </div>
   );
 };
+

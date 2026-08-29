@@ -9,7 +9,8 @@ import {
   FeedTab,
   MainView,
   SortOption,
-  ProductHotspot
+  ProductHotspot,
+  UserTasteProfile,
 } from './types';
 import {
   getStoredNotes,
@@ -25,8 +26,20 @@ import {
   getStoredOrders,
   saveOrder,
   calculateNoteScore,
-  calculateDistanceKm
+  calculateDistanceKm,
 } from './lib/storage';
+import {
+  getUserTasteProfile,
+  saveUserTasteProfile,
+  recordAlgoInteraction,
+  scoreNoteForUser,
+} from './lib/algoEngine';
+import {
+  fetchCloudNotes,
+  fetchCloudProducts,
+  createCloudNote,
+  createCloudOrder,
+} from './lib/supabaseService';
 import { Header } from './components/Header';
 import { NavigationDock } from './components/NavigationDock';
 import { FeedGrid } from './components/FeedGrid';
@@ -37,6 +50,7 @@ import { ShoppingView } from './components/ShoppingView';
 import { CartDrawer } from './components/CartDrawer';
 import { UserProfileView } from './components/UserProfileView';
 import { NotificationsView } from './components/NotificationsView';
+import { AlgoTunerModal } from './components/AlgoTunerModal';
 
 export default function App() {
   // Core application data stores
@@ -45,12 +59,16 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState<User>(getStoredUser());
   const [cart, setCart] = useState<CartItem[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
+  const [isLoadingCloud, setIsLoadingCloud] = useState(true);
+
+  // User Algorithm Taste Profile
+  const [tasteProfile, setTasteProfile] = useState<UserTasteProfile>(getUserTasteProfile());
 
   // Navigation & View States
   const [currentView, setCurrentView] = useState<MainView>('feed');
-  const [activeFeedTab, setActiveFeedTab] = useState<FeedTab>('explore');
+  const [activeFeedTab, setActiveFeedTab] = useState<FeedTab>('algo');
   const [selectedCategory, setSelectedCategory] = useState<string>('All');
-  const [sortBy, setSortBy] = useState<SortOption>('trending');
+  const [sortBy, setSortBy] = useState<SortOption>('algo');
 
   // Modal / Drawer Overlays
   const [selectedNote, setSelectedNote] = useState<Note | null>(null);
@@ -58,6 +76,7 @@ export default function App() {
   const [isPublishOpen, setIsPublishOpen] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isCartOpen, setIsCartOpen] = useState(false);
+  const [isAlgoTunerOpen, setIsAlgoTunerOpen] = useState(false);
 
   // User location for Nearby tab
   const [userLocation, setUserLocation] = useState<{ lat: number; lon: number }>({
@@ -65,21 +84,50 @@ export default function App() {
     lon: 139.6503, // Tokyo default
   });
 
-  // Initial Load from Persistence
+  // Initial Load from Cloud (Supabase) with local fallback
   useEffect(() => {
-    const loadedNotes = getStoredNotes();
-    const loadedProducts = getStoredProducts();
-    const loadedCart = getStoredCart();
-    const loadedOrders = getStoredOrders();
-    const loadedUser = getStoredUser();
+    // 1. Immediate local hydration for instant render
+    const localNotes = getStoredNotes();
+    const localProducts = getStoredProducts();
+    setNotes(localNotes);
+    setProducts(localProducts);
+    setCart(getStoredCart());
+    setOrders(getStoredOrders());
+    setCurrentUser(getStoredUser());
+    setTasteProfile(getUserTasteProfile());
 
-    setNotes(loadedNotes);
-    setProducts(loadedProducts);
-    setCart(loadedCart);
-    setOrders(loadedOrders);
-    setCurrentUser(loadedUser);
+    // 2. Fetch latest live data from Supabase PostgreSQL
+    async function loadCloudData() {
+      try {
+        const [cloudNotes, cloudProducts] = await Promise.all([
+          fetchCloudNotes(),
+          fetchCloudProducts(),
+        ]);
 
-    // Try detecting browser geolocation for Spatial PostGIS simulation
+        if (cloudNotes.length > 0) {
+          // Calculate scores dynamically
+          const scored = cloudNotes.map((n: Note) => ({
+            ...n,
+            score: calculateNoteScore(n),
+          }));
+          setNotes(scored);
+          saveNotes(scored);
+        }
+
+        if (cloudProducts.length > 0) {
+          setProducts(cloudProducts);
+          saveProducts(cloudProducts);
+        }
+      } catch (err) {
+        console.warn('Cloud sync fallback to local storage:', err);
+      } finally {
+        setIsLoadingCloud(false);
+      }
+    }
+
+    loadCloudData();
+
+    // 3. Browser geolocation for Nearby feed
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
         (pos) => {
@@ -89,7 +137,7 @@ export default function App() {
           });
         },
         () => {
-          // Keep default
+          // Keep default Tokyo coords
         }
       );
     }
@@ -103,11 +151,20 @@ export default function App() {
     }
   }, [selectedNote]);
 
-  // Compute feed notes based on Tab, Category, Sorting, and PostGIS distance
+  // Compute feed notes based on Tab, Category, Sorting, Your Algo, and PostGIS distance
   const displayedNotes = useMemo(() => {
-    let result = [...notes];
+    // 1. Calculate personalized Your Algo score and reasons for every note
+    let result = notes.map((note) => {
+      const { algoScore, matchReason, matchPercentage } = scoreNoteForUser(note, tasteProfile);
+      return {
+        ...note,
+        algoScore,
+        algoMatchReason: matchReason,
+        algoMatchPercentage: matchPercentage,
+      };
+    });
 
-    // Filter by tab:
+    // 2. Filter by feed tab:
     if (activeFeedTab === 'follow') {
       result = result.filter((n) => n.user?.isFollowing || n.userId === currentUser.id);
     } else if (activeFeedTab === 'nearby') {
@@ -121,13 +178,16 @@ export default function App() {
       result.sort((a, b) => (a.distanceKm || 0) - (b.distanceKm || 0));
     }
 
-    // Filter by category:
+    // 3. Filter by category:
     if (selectedCategory !== 'All') {
       result = result.filter((n) => n.category === selectedCategory);
     }
 
-    // Sort:
-    if (activeFeedTab !== 'nearby') {
+    // 4. Sort notes:
+    if (activeFeedTab === 'algo' || sortBy === 'algo') {
+      // Sort by Your Algo personalized recommendation score
+      result.sort((a, b) => (b.algoScore || 0) - (a.algoScore || 0));
+    } else if (activeFeedTab !== 'nearby') {
       if (sortBy === 'trending') {
         result.sort((a, b) => (b.score || 0) - (a.score || 0));
       } else if (sortBy === 'latest') {
@@ -138,11 +198,42 @@ export default function App() {
     }
 
     return result;
-  }, [notes, activeFeedTab, selectedCategory, sortBy, currentUser, userLocation]);
+  }, [notes, activeFeedTab, selectedCategory, sortBy, currentUser, userLocation, tasteProfile]);
 
-  // User Action Handlers
+  // Handle category selection and teach the algorithm
+  const handleSelectCategory = (cat: string) => {
+    setSelectedCategory(cat);
+    if (cat !== 'All') {
+      const updatedProfile = recordAlgoInteraction('category_click', { category: cat });
+      setTasteProfile(updatedProfile);
+    }
+  };
+
+  // Select note handler with view dwell learning
+  const handleSelectNote = (note: Note) => {
+    setSelectedNote(note);
+    const updatedProfile = recordAlgoInteraction('view', {
+      category: note.category,
+      tags: note.tags,
+      creatorId: note.userId,
+    });
+    setTasteProfile(updatedProfile);
+  };
+
+  // User Action Handlers (with algorithm signal learning)
   const handleToggleLike = (noteId: string, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
+
+    const targetNote = notes.find((n) => n.id === noteId);
+    if (targetNote && !targetNote.isLiked) {
+      // Record positive reinforcement in algorithm
+      const updatedProfile = recordAlgoInteraction('like', {
+        category: targetNote.category,
+        tags: targetNote.tags,
+        creatorId: targetNote.userId,
+      });
+      setTasteProfile(updatedProfile);
+    }
 
     const updated = notes.map((n) => {
       if (n.id === noteId) {
@@ -158,11 +249,30 @@ export default function App() {
     saveNotes(updated);
 
     if (selectedNote && selectedNote.id === noteId) {
-      setSelectedNote((prev) => (prev ? { ...prev, isLiked: !prev.isLiked, likesCount: prev.isLiked ? prev.likesCount - 1 : prev.likesCount + 1 } : null));
+      setSelectedNote((prev) =>
+        prev
+          ? {
+              ...prev,
+              isLiked: !prev.isLiked,
+              likesCount: prev.isLiked ? prev.likesCount - 1 : prev.likesCount + 1,
+            }
+          : null
+      );
     }
   };
 
   const handleToggleSave = (noteId: string) => {
+    const targetNote = notes.find((n) => n.id === noteId);
+    if (targetNote && !targetNote.isSaved) {
+      // High-intent save signal for algorithm
+      const updatedProfile = recordAlgoInteraction('save', {
+        category: targetNote.category,
+        tags: targetNote.tags,
+        creatorId: targetNote.userId,
+      });
+      setTasteProfile(updatedProfile);
+    }
+
     const updated = notes.map((n) => {
       if (n.id === noteId) {
         const isSaved = !n.isSaved;
@@ -177,7 +287,15 @@ export default function App() {
     saveNotes(updated);
 
     if (selectedNote && selectedNote.id === noteId) {
-      setSelectedNote((prev) => (prev ? { ...prev, isSaved: !prev.isSaved, savesCount: prev.isSaved ? prev.savesCount - 1 : prev.savesCount + 1 } : null));
+      setSelectedNote((prev) =>
+        prev
+          ? {
+              ...prev,
+              isSaved: !prev.isSaved,
+              savesCount: prev.isSaved ? prev.savesCount - 1 : prev.savesCount + 1,
+            }
+          : null
+      );
     }
   };
 
@@ -208,7 +326,9 @@ export default function App() {
               user: {
                 ...prev.user,
                 isFollowing: !prev.user.isFollowing,
-                followersCount: !prev.user.isFollowing ? prev.user.followersCount + 1 : prev.user.followersCount - 1,
+                followersCount: !prev.user.isFollowing
+                  ? prev.user.followersCount + 1
+                  : prev.user.followersCount - 1,
               },
             }
           : null
@@ -231,6 +351,16 @@ export default function App() {
 
     saveComment(noteId, newComment);
     setActiveNoteComments(getStoredComments(noteId));
+
+    const targetNote = notes.find((n) => n.id === noteId);
+    if (targetNote) {
+      const updatedProfile = recordAlgoInteraction('comment', {
+        category: targetNote.category,
+        tags: targetNote.tags,
+        creatorId: targetNote.userId,
+      });
+      setTasteProfile(updatedProfile);
+    }
 
     // Increment comment count on note
     const updated = notes.map((n) => {
@@ -261,7 +391,9 @@ export default function App() {
     let updated: CartItem[];
     const exists = cart.find((i) => i.product.id === product.id);
     if (exists) {
-      updated = cart.map((i) => (i.product.id === product.id ? { ...i, quantity: i.quantity + 1 } : i));
+      updated = cart.map((i) =>
+        i.product.id === product.id ? { ...i, quantity: i.quantity + 1 } : i
+      );
     } else {
       updated = [...cart, { id: `cart-${Date.now()}`, product, quantity: 1 }];
     }
@@ -300,10 +432,13 @@ export default function App() {
     setOrders((prev) => [newOrder, ...prev]);
     setCart([]);
     saveCart([]);
+
+    // Cloud background sync
+    createCloudOrder(newOrder);
   };
 
   // Creator Note Publishing
-  const handlePublishNote = (newNoteData: {
+  const handlePublishNote = async (newNoteData: {
     title: string;
     content: string;
     mediaUrls: string[];
@@ -340,11 +475,15 @@ export default function App() {
 
     newNote.score = calculateNoteScore(newNote);
 
+    // Immediate optimistic local update
     const updated = [newNote, ...notes];
     setNotes(updated);
     saveNotes(updated);
     setCurrentView('feed');
-    setActiveFeedTab('explore');
+    setActiveFeedTab('algo');
+
+    // Asynchronous cloud insertion into Supabase
+    createCloudNote(newNote, newNoteData.hotspots);
   };
 
   const handleCreateProduct = (newProd: Omit<Product, 'id'>): Product => {
@@ -378,12 +517,13 @@ export default function App() {
           activeTab={activeFeedTab}
           onTabChange={setActiveFeedTab}
           selectedCategory={selectedCategory}
-          onSelectCategory={setSelectedCategory}
+          onSelectCategory={handleSelectCategory}
           sortBy={sortBy}
           onSortChange={setSortBy}
           onOpenSearch={() => setIsSearchOpen(true)}
           onOpenCart={() => setIsCartOpen(true)}
           cartCount={totalCartCount}
+          onOpenAlgoTuner={() => setIsAlgoTunerOpen(true)}
         />
       )}
 
@@ -392,9 +532,11 @@ export default function App() {
         {currentView === 'feed' && (
           <FeedGrid
             notes={displayedNotes}
-            onSelectNote={setSelectedNote}
+            onSelectNote={handleSelectNote}
             onToggleLike={handleToggleLike}
             isNearbyTab={activeFeedTab === 'nearby'}
+            isAlgoTab={activeFeedTab === 'algo'}
+            onOpenAlgoTuner={() => setIsAlgoTunerOpen(true)}
           />
         )}
 
@@ -404,7 +546,7 @@ export default function App() {
             notes={notes}
             onAddToCart={handleAddToCart}
             onBuyNow={handleBuyNow}
-            onSelectNote={setSelectedNote}
+            onSelectNote={handleSelectNote}
           />
         )}
 
@@ -412,7 +554,7 @@ export default function App() {
           <NotificationsView
             currentUser={currentUser}
             notes={notes}
-            onSelectNote={setSelectedNote}
+            onSelectNote={handleSelectNote}
           />
         )}
 
@@ -425,7 +567,7 @@ export default function App() {
             likedNotes={likedNotes}
             myOrders={orders}
             allProducts={products}
-            onSelectNote={setSelectedNote}
+            onSelectNote={handleSelectNote}
             onToggleLike={handleToggleLike}
             onOpenPublish={() => setIsPublishOpen(true)}
           />
@@ -462,7 +604,7 @@ export default function App() {
         onClose={() => setIsSearchOpen(false)}
         notes={notes}
         products={products}
-        onSelectNote={setSelectedNote}
+        onSelectNote={handleSelectNote}
         onSelectProduct={(p) => {
           handleAddToCart(p);
         }}
@@ -477,6 +619,14 @@ export default function App() {
         onCheckoutSuccess={handleCheckoutSuccess}
       />
 
+      {/* Your Algo Interactive Tuner Modal */}
+      <AlgoTunerModal
+        isOpen={isAlgoTunerOpen}
+        onClose={() => setIsAlgoTunerOpen(false)}
+        tasteProfile={tasteProfile}
+        onUpdateTasteProfile={(updated) => setTasteProfile(updated)}
+      />
+
       {/* Signature Bottom Mobile Navigation Dock */}
       <NavigationDock
         currentView={currentView}
@@ -488,3 +638,4 @@ export default function App() {
     </div>
   );
 }
+

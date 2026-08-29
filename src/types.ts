@@ -78,6 +78,9 @@ export interface Note {
   isSaved?: boolean;
   hotspots: ProductHotspot[];
   score?: number; // Time-decay mathematical score
+  algoScore?: number; // Personalized Instagram-like Your Algo score
+  algoMatchReason?: string; // e.g. "✨ 96% Match · #Cinema affinity"
+  algoMatchPercentage?: number; // 0 - 100%
 }
 
 export interface CartItem {
@@ -99,6 +102,23 @@ export interface Order {
   trackingNumber: string;
 }
 
-export type FeedTab = 'explore' | 'follow' | 'nearby';
+export interface UserAlgoPreferences {
+  freshnessWeight: number; // 0 (popular/all-time) to 1 (newest first)
+  discoveryBias: number; // 0 (pure echo-chamber match) to 1 (high exploration)
+  shoppingBias: number; // 0 to 1 (priority on notes with product hotspots)
+  boostedCategories: string[];
+}
+
+export interface UserTasteProfile {
+  categoryWeights: Record<string, number>;
+  tagWeights: Record<string, number>;
+  creatorAffinities: Record<string, number>;
+  preferences: UserAlgoPreferences;
+  totalInteractions: number;
+  lastUpdated: string;
+}
+
+export type FeedTab = 'explore' | 'algo' | 'follow' | 'nearby';
 export type MainView = 'feed' | 'shop' | 'search' | 'profile' | 'notifications';
-export type SortOption = 'trending' | 'latest' | 'likes' | 'nearby';
+export type SortOption = 'trending' | 'algo' | 'latest' | 'likes' | 'nearby';
+
